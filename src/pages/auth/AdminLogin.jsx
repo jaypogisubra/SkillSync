@@ -1,28 +1,93 @@
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { signIn, signOut } from "../../services/authService";
+import { supabase } from "../../services/supabase";
+import { setCurrentUser } from "../../services/localStorageService";
 import "./AdminLogin.css";
 
 export default function AdminLogin() {
   const navigate = useNavigate();
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
+    setError("");
+    setLoading(true);
 
-    const admin = {
-      email: event.target.email.value,
-      role: "admin",
-    };
+    const email = event.target.email.value.trim();
+    const password = event.target.password.value;
 
-    localStorage.setItem("skillsync_user", JSON.stringify(admin));
-    navigate("/admin/dashboard");
+    const adminEmail = import.meta.env.VITE_ADMIN_EMAIL || "admin@skillsync.com";
+    const adminPassword = import.meta.env.VITE_ADMIN_PASSWORD || "12345678";
+
+    try {
+      const { data, error: signInError } = await signIn(email, password);
+
+      if (!signInError && data?.user) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role, full_name, email")
+          .eq("id", data.user.id)
+          .maybeSingle();
+
+        if (profile?.role === "admin") {
+          setCurrentUser({
+            id: data.user.id,
+            email: profile?.email || data.user.email,
+            role: "admin",
+            full_name: profile?.full_name || "",
+          });
+          navigate("/admin/dashboard");
+          return;
+        }
+
+        await signOut();
+        setError("This account is not an admin. Use the regular sign-in page.");
+        return;
+      }
+
+      if (email === adminEmail && password === adminPassword) {
+        setCurrentUser({
+          email,
+          role: "admin",
+          is_local_admin: true,
+        });
+        navigate("/admin/dashboard");
+        return;
+      }
+
+      setError("Incorrect admin email or password. Please try again.");
+    } catch (err) {
+      console.error("Admin login error:", err);
+      setError("Something went wrong. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
     <main className="admin-login-page">
       <section className="admin-login-card">
-        <div className="admin-login-showcase">
+        <section className="admin-login-showcase">
+          <Link to="/" className="admin-back-btn">
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <line x1="19" y1="12" x2="5" y2="12"></line>
+              <polyline points="12 19 5 12 12 5"></polyline>
+            </svg>
+            <span>Back to Home</span>
+          </Link>
           <div className="admin-login-brand">
             <div className="admin-login-brand-icon">✓</div>
-
             <div>
               <h2>SkillSync</h2>
               <p>Find the right match</p>
@@ -31,7 +96,6 @@ export default function AdminLogin() {
 
           <div className="admin-login-showcase-content">
             <span className="admin-login-chip">Admin Portal</span>
-
             <div className="admin-login-copy">
               <h1>Manage SkillSync with clarity.</h1>
               <p>
@@ -40,12 +104,14 @@ export default function AdminLogin() {
               </p>
             </div>
           </div>
-        </div>
+        </section>
 
         <div className="admin-login-form-side">
           <div className="admin-login-form-wrap">
             <h1>Admin access</h1>
             <p>Sign in to manage users, jobs, employers, and reports.</p>
+
+            {error && <div className="admin-login-error">{error}</div>}
 
             <form className="admin-login-form" onSubmit={handleSubmit}>
               <label>
@@ -68,7 +134,9 @@ export default function AdminLogin() {
                 />
               </label>
 
-              <button type="submit">Login as Admin</button>
+              <button type="submit" disabled={loading}>
+                {loading ? "Logging in..." : "Login as Admin"}
+              </button>
             </form>
 
             <div className="admin-login-footer">

@@ -59,10 +59,29 @@ export const getCandidateProfile = () => {
   }
 }
 
-export const saveCandidateProfile = (profileData) => {
+export const saveCandidateProfile = (profileData, userId) => {
   try {
-    localStorage.setItem(PROFILE_KEY, JSON.stringify(profileData))
+    const payload = { ...profileData, id: userId || profileData?.id }
+    localStorage.setItem(PROFILE_KEY, JSON.stringify(payload))
+    if (userId) {
+      localStorage.setItem(`${PROFILE_KEY}_${userId}`, JSON.stringify(payload))
+    }
   } catch (error) {
     console.error("Error saving candidate profile to localStorage:", error)
+  }
+}
+
+export const getCandidateProfileByUserId = (userId) => {
+  if (!userId) return getCandidateProfile()
+  try {
+    const keyed = localStorage.getItem(`${PROFILE_KEY}_${userId}`)
+    if (keyed) return JSON.parse(keyed)
+    const legacy = localStorage.getItem(PROFILE_KEY)
+    if (!legacy) return null
+    const parsed = JSON.parse(legacy)
+    return parsed?.id === userId ? parsed : null
+  } catch (error) {
+    console.error("Error reading candidate profile from localStorage:", error)
+    return null
   }
 }

@@ -1,15 +1,25 @@
 import { useEffect, useState } from "react";
 import DashboardLayout from "../../components/layout/DashboardLayout";
 import { supabase } from "../../services/supabase";
+import { fetchAdminProfiles, filterEmployers, displayUserName } from "../../services/adminService";
 
 export default function ManageEmployers() {
   const [employers, setEmployers] = useState([]);
+  const [loadError, setLoadError] = useState("");
 
-  useEffect(() => { loadEmployers(); }, []);
+  useEffect(() => {
+    loadEmployers();
+  }, []);
 
   async function loadEmployers() {
-    const { data } = await supabase.from("profiles").select("*").eq("role", "employer");
-    setEmployers(data || []);
+    setLoadError("");
+    const { data: profiles, error } = await fetchAdminProfiles();
+    if (error && (!profiles || profiles.length === 0)) {
+      setLoadError(
+        "Could not load employers. Run supabase/admin_access.sql in your Supabase SQL Editor, then refresh."
+      );
+    }
+    setEmployers(filterEmployers(profiles));
   }
 
   async function handleRemoveEmployer(userId) {
@@ -31,7 +41,10 @@ export default function ManageEmployers() {
         <div className="panel-header employers-panel-header">
           <div className="panel-header-content"><h2>Employer Accounts</h2></div>
         </div>
-        {employers.length === 0 ? (
+
+        {loadError && <div className="profile-message">{loadError}</div>}
+
+        {employers.length === 0 && !loadError ? (
           <div className="empty-state">
             <span>▤</span><h3>No employers yet</h3>
             <p>Registered employer accounts will be displayed here.</p>
@@ -45,7 +58,7 @@ export default function ManageEmployers() {
                     {(employer.full_name || employer.email || "E").charAt(0).toUpperCase()}
                   </div>
                   <div>
-                    <h3>{employer.full_name || "Unnamed Employer"}</h3>
+                    <h3>{displayUserName(employer)}</h3>
                     <p>{employer.email || "No email"}</p>
                   </div>
                 </div>

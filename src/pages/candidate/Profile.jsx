@@ -2,6 +2,13 @@ import "./Profile.css";
 import { useEffect, useState } from "react";
 import DashboardLayout from "../../components/layout/DashboardLayout";
 import { supabase } from "../../services/supabase";
+import { syncApplicantSnapshot } from "../../services/applicationService";
+import {
+  getCurrentUser,
+  getCandidateProfileByUserId,
+  saveCandidateProfile,
+  setCurrentUser,
+} from "../../services/localStorageService";
 
 const defaultProfile = {
   fullName: "",
@@ -13,6 +20,35 @@ const defaultProfile = {
   confirmPassword: "",
 };
 
+function parseSkills(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw.filter(Boolean);
+  if (typeof raw === "string" && raw.length > 0) {
+    return raw.split(",").map((s) => s.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function profileFromRow(data, user) {
+  return {
+    ...defaultProfile,
+    fullName: data.full_name || user?.user_metadata?.full_name || "",
+    email: data.email || user?.email || "",
+    contactNumber: data.contact_number || "",
+    address: data.address || "",
+  };
+}
+
+function profileFromCache(cached, user) {
+  return {
+    ...defaultProfile,
+    fullName: cached.fullName || cached.full_name || user?.full_name || "",
+    email: cached.email || user?.email || "",
+    contactNumber: cached.contactNumber || cached.contact_number || "",
+    address: cached.address || "",
+  };
+}
+
 export default function Profile() {
   const [profile, setProfile] = useState(defaultProfile);
   const [skills, setSkills] = useState([]);
@@ -22,57 +58,163 @@ export default function Profile() {
   const [userId, setUserId] = useState(null);
   const [activeTab, setActiveTab] = useState("view");
 
-  useEffect(() => {
-    loadProfile();
-  }, []);
+  function applyProfileState(nextProfile, nextSkills) {
+    setProfile(nextProfile);
+    setSkills(nextSkills);
+  }
 
-  async function loadProfile() {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+  function cacheProfileLocally(id, nextProfile, nextSkills) {
+    saveCandidateProfile(
+      {
+        id,
+        fullName: nextProfile.fullName,
+        full_name: nextProfile.fullName,
+        email: nextProfile.email,
+        contactNumber: nextProfile.contactNumber,
+        contact_number: nextProfile.contactNumber,
+        address: nextProfile.address,
+        skills: nextSkills,
+      },
+      id
+    );
+  }
+
+  async function persistProfileToServer(id, nextProfile, nextSkills) {
+    const storedUser = getCurrentUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) return { error: new Error("No active session") };
+
+    const payload = {
+      id,
+      full_name: nextProfile.fullName.trim(),
+      email: nextProfile.email.trim() || session.user.email || storedUser?.email,
+      contact_number: nextProfile.contactNumber.trim(),
+      address: nextProfile.address.trim(),
+      skills: nextSkills.join(","),
+      role: storedUser?.role || session.user?.user_metadata?.role || "candidate",
+    };
+
+    let result = await supabase.from("profiles").upsert(payload);
+
+    if (result.error?.message?.toLowerCase().includes("skills")) {
+      const { skills: _skills, ...withoutSkills } = payload;
+      result = await supabase.from("profiles").upsert(withoutSkills);
+    }
+
+    return result;
+  }
+
+  function updateStoredUserName(fullName) {
+    const stored = getCurrentUser();
+    if (!stored) return;
+    setCurrentUser({
+      ...stored,
+      full_name: fullName,
+      fullName,
+      name: fullName,
+    });
+  }
+
+  async function loadProfileForUser(user) {
+    if (!user?.id) return;
     setUserId(user.id);
 
-    const { data } = await supabase
+    const storedUser = getCurrentUser();
+    const { data, error } = await supabase
       .from("profiles")
       .select("*")
       .eq("id", user.id)
-      .single();
+      .maybeSingle();
 
     if (data) {
-      setProfile({
+      applyProfileState(profileFromRow(data, user), parseSkills(data.skills));
+      cacheProfileLocally(user.id, profileFromRow(data, user), parseSkills(data.skills));
+      return;
+    }
+
+    const cached = getCandidateProfileByUserId(user.id);
+    if (cached) {
+      applyProfileState(
+        profileFromCache(cached, { ...user, ...storedUser }),
+        parseSkills(cached.skills)
+      );
+      return;
+    }
+
+    applyProfileState(
+      {
         ...defaultProfile,
-        fullName: data.full_name || "",
-        email: data.email || user.email || "",
-        contactNumber: data.contact_number || "",
-        address: data.address || "",
-      });
-      // Load skills — stored as array or comma string
-      if (data.skills) {
-        if (Array.isArray(data.skills)) {
-          setSkills(data.skills);
-        } else if (typeof data.skills === "string" && data.skills.length > 0) {
-          setSkills(data.skills.split(",").map((s) => s.trim()).filter(Boolean));
-        }
-      }
-    } else {
-      setProfile({
-        ...defaultProfile,
-        email: user.email || "",
-        fullName: user.user_metadata?.full_name || "",
-      });
+        email: user.email || storedUser?.email || "",
+        fullName: user.user_metadata?.full_name || storedUser?.full_name || "",
+      },
+      []
+    );
+
+    if (error) {
+      console.warn("Could not load profile from database:", error.message);
     }
   }
+
+  useEffect(() => {
+    let active = true;
+
+    async function init() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user && active) {
+        await loadProfileForUser(session.user);
+      }
+    }
+
+    init();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event) => {
+        if (!active) return;
+        if (event === "SIGNED_OUT") {
+          setProfile(defaultProfile);
+          setSkills([]);
+          setUserId(null);
+          setSaving(false);
+        }
+      }
+    );
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, []);
 
   function handleChange(e) {
     const { name, value } = e.target;
     setProfile((prev) => ({ ...prev, [name]: value }));
   }
 
-  function handleAddSkill() {
+  async function handleAddSkill() {
     const trimmed = skillInput.trim();
     if (!trimmed) return;
     if (skills.includes(trimmed)) return;
-    setSkills((prev) => [...prev, trimmed]);
+    const nextSkills = [...skills, trimmed];
+    setSkills(nextSkills);
     setSkillInput("");
+
+    const activeId = userId || getCurrentUser()?.id;
+    if (!activeId) return;
+
+    setUserId(activeId);
+    cacheProfileLocally(activeId, profile, nextSkills);
+
+    const { error } = await persistProfileToServer(activeId, profile, nextSkills);
+    if (!error) {
+      updateStoredUserName(profile.fullName);
+      syncApplicantSnapshot(activeId).catch(() => {});
+    }
+    if (error) {
+      setMessage({
+        text: "Skill added locally. Click Save Changes after signing in to sync to your account.",
+        type: "error",
+      });
+    }
   }
 
   function handleSkillKeyDown(e) {
@@ -82,8 +224,15 @@ export default function Profile() {
     }
   }
 
-  function handleRemoveSkill(skill) {
-    setSkills((prev) => prev.filter((s) => s !== skill));
+  async function handleRemoveSkill(skill) {
+    const nextSkills = skills.filter((s) => s !== skill);
+    setSkills(nextSkills);
+
+    const activeId = userId || getCurrentUser()?.id;
+    if (!activeId) return;
+
+    cacheProfileLocally(activeId, profile, nextSkills);
+    await persistProfileToServer(activeId, profile, nextSkills);
   }
 
   async function handleSubmit(e) {
@@ -91,57 +240,90 @@ export default function Profile() {
     setSaving(true);
     setMessage({ text: "", type: "success" });
 
-    if (profile.newPassword || profile.confirmPassword) {
-      if (!profile.currentPassword) {
-        setMessage({ text: "Please enter your current password before changing it.", type: "error" });
-        setSaving(false);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const storedUser = getCurrentUser();
+      const activeUserId = session?.user?.id || userId || storedUser?.id;
+
+      if (!activeUserId) {
+        setMessage({
+          text: "Your session expired. Please sign in again, then save your profile.",
+          type: "error",
+        });
         return;
       }
-      if (profile.newPassword !== profile.confirmPassword) {
-        setMessage({ text: "New password and confirm password do not match.", type: "error" });
-        setSaving(false);
+
+      setUserId(activeUserId);
+
+      if (profile.newPassword || profile.confirmPassword) {
+        if (!profile.currentPassword) {
+          setMessage({
+            text: "Please enter your current password before changing it.",
+            type: "error",
+          });
+          return;
+        }
+        if (profile.newPassword !== profile.confirmPassword) {
+          setMessage({
+            text: "New password and confirm password do not match.",
+            type: "error",
+          });
+          return;
+        }
+        if (profile.newPassword.length < 6) {
+          setMessage({
+            text: "New password must be at least 6 characters.",
+            type: "error",
+          });
+          return;
+        }
+        const { error: pwError } = await supabase.auth.updateUser({
+          password: profile.newPassword,
+        });
+        if (pwError) {
+          setMessage({
+            text: "Failed to update password: " + pwError.message,
+            type: "error",
+          });
+          return;
+        }
+      }
+
+      cacheProfileLocally(activeUserId, profile, skills);
+
+      const { error } = await persistProfileToServer(activeUserId, profile, skills);
+
+      if (error) {
+        setMessage({
+          text:
+            "Could not sync to the server (" +
+            error.message +
+            "). Your changes were saved on this device.",
+          type: "error",
+        });
         return;
       }
-      if (profile.newPassword.length < 6) {
-        setMessage({ text: "New password must be at least 6 characters.", type: "error" });
-        setSaving(false);
-        return;
-      }
-      const { error: pwError } = await supabase.auth.updateUser({
-        password: profile.newPassword,
+
+      updateStoredUserName(profile.fullName.trim());
+      syncApplicantSnapshot(activeUserId).catch(() => {});
+
+      setProfile((prev) => ({
+        ...prev,
+        currentPassword: "",
+        newPassword: "",
+        confirmPassword: "",
+      }));
+
+      setMessage({ text: "Profile updated successfully!", type: "success" });
+      setActiveTab("view");
+    } catch (err) {
+      setMessage({
+        text: err.message || "Something went wrong while saving. Please try again.",
+        type: "error",
       });
-      if (pwError) {
-        setMessage({ text: "Failed to update password: " + pwError.message, type: "error" });
-        setSaving(false);
-        return;
-      }
-    }
-
-    const { error } = await supabase.from("profiles").upsert({
-      id: userId,
-      full_name: profile.fullName,
-      email: profile.email,
-      contact_number: profile.contactNumber,
-      address: profile.address,
-      skills: skills.join(","),
-    });
-
-    if (error) {
-      setMessage({ text: "Failed to save profile: " + error.message, type: "error" });
+    } finally {
       setSaving(false);
-      return;
     }
-
-    setProfile((prev) => ({
-      ...prev,
-      currentPassword: "",
-      newPassword: "",
-      confirmPassword: "",
-    }));
-
-    setSaving(false);
-    setMessage({ text: "Profile updated successfully!", type: "success" });
-    setActiveTab("view");
   }
 
   return (
@@ -299,7 +481,10 @@ export default function Profile() {
               {/* Skills Input */}
               <div className="profile-skills-section">
                 <h3>Skills</h3>
-                <p>Add your skills one at a time. Press Enter or click Add.</p>
+                <p>
+                  Add your skills one at a time. Press Enter or click Add, then click{" "}
+                  <strong>Save Changes</strong> to keep them after refresh or logout.
+                </p>
                 <div className="profile-skills-input-row">
                   <input
                     type="text"
@@ -388,7 +573,10 @@ export default function Profile() {
                 <button
                   className="profile-cancel-btn"
                   type="button"
-                  onClick={() => setActiveTab("view")}
+                  onClick={() => {
+                    setSaving(false);
+                    setActiveTab("view");
+                  }}
                 >
                   Cancel
                 </button>

@@ -61,6 +61,33 @@
   background: rgba(241, 48, 147, 0.36);
 }
 
+/* Back button */
+.admin-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 24px;
+  color: #ffffff;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 800;
+  padding: 8px 16px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(8px);
+  width: fit-content;
+  transition: all 0.2s ease;
+  z-index: 5;
+  position: relative;
+}
+
+.admin-back-btn:hover {
+  background: rgba(255, 255, 255, 0.24);
+  border-color: rgba(255, 255, 255, 0.35);
+  transform: translateX(-3px);
+}
+
 .admin-login-brand {
   position: relative;
   z-index: 2;
@@ -159,6 +186,19 @@
   color: #667085;
   font-size: 16px;
   line-height: 1.6;
+}
+
+.admin-login-error {
+  width: 100%;
+  padding: 13px 15px;
+  margin-bottom: 24px;
+  border: 1px solid #ffd4e7;
+  border-radius: 14px;
+  color: #d92d20;
+  background: #fff5fa;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.5;
 }
 
 .admin-login-form {

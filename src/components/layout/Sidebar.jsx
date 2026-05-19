@@ -43,8 +43,11 @@ export default function Sidebar({ role }) {
       : "Career Workspace";
 
   async function handleLogout() {
-    await signOut();
-    navigate("/");
+    try {
+      await signOut();
+    } finally {
+      navigate("/sign-in", { replace: true });
+    }
   }
 
   return (
@@ -77,7 +80,7 @@ export default function Sidebar({ role }) {
         ))}
       </nav>
 
-      <button className="sidebar-logout" onClick={handleLogout}>
+      <button type="button" className="sidebar-logout" onClick={handleLogout}>
         Logout
       </button>
     </aside>

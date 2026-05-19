@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 import DashboardLayout from "../../components/layout/DashboardLayout";
 import { supabase } from "../../services/supabase";
+import {
+  fetchAdminProfiles,
+  fetchAdminJobs,
+  filterJobSeekers,
+  filterEmployers,
+  displayUserName,
+} from "../../services/adminService";
 
 export default function ManageUsers() {
   const [jobSeekers, setJobSeekers] = useState([]);
@@ -11,19 +18,26 @@ export default function ManageUsers() {
     job_id: "", status: "shortlisted",
   });
   const [jobs, setJobs] = useState([]);
+  const [loadError, setLoadError] = useState("");
 
-  useEffect(() => { loadAccounts(); }, []);
+  useEffect(() => {
+    loadAccounts();
+  }, []);
 
   async function loadAccounts() {
-    const { data: profiles } = await supabase.from("profiles").select("*");
-    const { data: jobsData } = await supabase.from("jobs").select("*").eq("status", "open");
+    setLoadError("");
+    const { data: profiles, error } = await fetchAdminProfiles();
+    const { data: jobsData } = await fetchAdminJobs();
 
-    const seekers = (profiles || []).filter((p) => p.role === "candidate" || p.role === "job_seeker");
-    const emps = (profiles || []).filter((p) => p.role === "employer");
+    if (error && (!profiles || profiles.length === 0)) {
+      setLoadError(
+        "Could not load users. Run supabase/admin_access.sql in your Supabase SQL Editor, then refresh."
+      );
+    }
 
-    setJobSeekers(seekers);
-    setEmployers(emps);
-    setJobs(jobsData || []);
+    setJobSeekers(filterJobSeekers(profiles));
+    setEmployers(filterEmployers(profiles));
+    setJobs((jobsData || []).filter((j) => j.status === "open"));
   }
 
   async function handleRemoveUser(userId) {
@@ -72,7 +86,9 @@ export default function ManageUsers() {
         <div className="panel-header users-panel-header">
           <div className="panel-header-content"><h2>Job Seeker Accounts</h2></div>
         </div>
-        {jobSeekers.length === 0 ? (
+        {loadError && <div className="profile-message">{loadError}</div>}
+
+        {jobSeekers.length === 0 && !loadError ? (
           <div className="empty-state">
             <span>👥</span><h3>No job seekers yet</h3>
             <p>Registered job seeker accounts will appear here.</p>
@@ -86,7 +102,7 @@ export default function ManageUsers() {
                     {(user.full_name || user.email || "J").charAt(0).toUpperCase()}
                   </div>
                   <div>
-                    <h3>{user.full_name || "Unnamed Job Seeker"}</h3>
+                    <h3>{displayUserName(user)}</h3>
                     <p>{user.email || "No email"}</p>
                   </div>
                 </div>
@@ -120,12 +136,12 @@ export default function ManageUsers() {
                 {(selectedUser.full_name || selectedUser.email || "J").charAt(0).toUpperCase()}
               </div>
               <div>
-                <h3>{selectedUser.full_name || "Unnamed Job Seeker"}</h3>
+                <h3>{displayUserName(selectedUser)}</h3>
                 <p>{selectedUser.email || "No email"}</p>
               </div>
             </div>
             <div className="admin-user-details-grid">
-              <div><span>Full Name</span><strong>{selectedUser.full_name || "Not provided"}</strong></div>
+              <div><span>Full Name</span><strong>{selectedUser.full_name || displayUserName(selectedUser)}</strong></div>
               <div><span>Email</span><strong>{selectedUser.email || "Not provided"}</strong></div>
               <div><span>Contact</span><strong>{selectedUser.contact_number || "Not provided"}</strong></div>
               <div><span>Address</span><strong>{selectedUser.address || "Not provided"}</strong></div>

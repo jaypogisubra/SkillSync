@@ -18,8 +18,9 @@ export default function DashboardLayout({
       : "JOB SEEKER PANEL";
 
   const displayName =
-    currentUser?.name ||
+    currentUser?.full_name ||
     currentUser?.fullName ||
+    currentUser?.name ||
     currentUser?.email ||
     "Account";
 

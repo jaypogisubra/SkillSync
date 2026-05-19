@@ -188,7 +188,8 @@ export default function CandidateDashboard() {
 
             <div className="overview-panel-body">
               {recentApplications.length === 0 ? (
-                <div className="empty-state compact-empty-state">
+ 
+ <div className="empty-state compact-empty-state">
                   <span>▣</span>
                   <h3>No applications yet</h3>
                   <p>Your submitted applications will appear here after you apply to a job.</p>

@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { getCurrentUser as getStoredUser } from './localStorageService'
 
 // Sign Up
 export const signUp = async (email, password, fullName, role) => {
@@ -21,12 +22,28 @@ export const signIn = async (email, password) => {
   return { data, error }
 }
 
-// Sign Out
+// Sign Out — always clear local session even if Supabase is slow
 export const signOut = async () => {
-  const { error } = await supabase.auth.signOut()
+  const storedUser = getStoredUser()
+
   localStorage.removeItem("skillsync_user")
   localStorage.removeItem("skillsync_candidate_profile")
-  return { error }
+  if (storedUser?.id) {
+    localStorage.removeItem(`skillsync_candidate_profile_${storedUser.id}`)
+  }
+
+  document.body.style.overflow = ""
+
+  try {
+    await Promise.race([
+      supabase.auth.signOut(),
+      new Promise((resolve) => setTimeout(resolve, 2500)),
+    ])
+  } catch {
+    // Local session already cleared
+  }
+
+  return { error: null }
 }
 
 // Get Current User

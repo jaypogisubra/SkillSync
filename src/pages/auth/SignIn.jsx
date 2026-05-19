@@ -3,7 +3,14 @@ import { Link, useNavigate } from "react-router-dom";
 import { signIn } from "../../services/authService";
 import { supabase } from "../../services/supabase";
 import { setCurrentUser } from "../../services/localStorageService";
+import { getDashboardPath } from "../../utils/getDashboardPath";
 import "./SignIn.css";
+
+function resolveRole(profileRole, metadataRole) {
+  const role = profileRole || metadataRole || "candidate";
+  if (role === "job_seeker") return "candidate";
+  return role;
+}
 
 export default function SignIn() {
   const navigate = useNavigate();
@@ -11,7 +18,6 @@ export default function SignIn() {
   const [formData, setFormData] = useState({
     email: "",
     password: "",
-    accountType: "candidate",
   });
 
   const [error, setError] = useState("");
@@ -26,25 +32,16 @@ export default function SignIn() {
     setError("");
   }
 
-  function getDashboardPath(role) {
-    if (role === "candidate" || role === "job_seeker") return "/candidate/dashboard";
-    if (role === "employer") return "/employer/dashboard";
-    if (role === "admin") return "/admin/dashboard";
-    return "/candidate/dashboard";
-  }
-
   async function handleSubmit(e) {
     e.preventDefault();
     setLoading(true);
     setError("");
 
     try {
-      console.log("Step 1: Attempting signIn...");
-      const { data, error } = await signIn(formData.email, formData.password);
+      const { data, error: signInError } = await signIn(formData.email, formData.password);
 
-      if (error) {
-        console.error("Supabase login error:", error);
-        const msg = error.message?.toLowerCase() || "";
+      if (signInError) {
+        const msg = signInError.message?.toLowerCase() || "";
         if (msg.includes("email not confirmed")) {
           setError("Your email is not confirmed yet. Please check your inbox and click the confirmation link.");
         } else if (msg.includes("invalid login credentials") || msg.includes("invalid email or password")) {
@@ -52,49 +49,28 @@ export default function SignIn() {
         } else if (msg.includes("too many requests")) {
           setError("Too many login attempts. Please wait a moment and try again.");
         } else {
-          setError(error.message || "Login failed. Please try again.");
+          setError(signInError.message || "Login failed. Please try again.");
         }
-        setLoading(false);
         return;
       }
 
-      console.log("Step 2: signIn success. User:", data.user?.id);
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role, full_name, email")
+        .eq("id", data.user.id)
+        .maybeSingle();
 
-      // Fetch profile with a 5-second timeout to prevent hanging
-      let role = formData.accountType;
-      try {
-        const profilePromise = supabase
-          .from("profiles")
-          .select("role")
-          .eq("id", data.user.id)
-          .single();
+      const role = resolveRole(profile?.role, data.user?.user_metadata?.role);
 
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Profile fetch timed out")), 5000)
-        );
-
-        const { data: profile, error: profileError } = await Promise.race([profilePromise, timeoutPromise]);
-
-        if (profileError) {
-          console.warn("Profile fetch error (non-critical):", profileError);
-        } else {
-          console.log("Step 3: Profile fetched:", profile);
-          role = profile?.role || data.user?.user_metadata?.role || formData.accountType;
-        }
-      } catch (profileErr) {
-        console.warn("Profile fetch failed (using fallback role):", profileErr.message);
-        role = data.user?.user_metadata?.role || formData.accountType;
-      }
-
-      console.log("Step 4: Saving user to localStorage and navigating with role:", role);
-      // Save user + role to localStorage so RoleRoute can verify the session
       setCurrentUser({
         id: data.user.id,
-        email: data.user.email,
-        role: role,
-        full_name: data.user?.user_metadata?.full_name || "",
+        email: profile?.email || data.user.email,
+        role,
+        full_name: profile?.full_name || data.user?.user_metadata?.full_name || "",
       });
-      navigate(getDashboardPath(role));
+
+      const path = getDashboardPath(role);
+      navigate(path === "/" ? "/candidate/dashboard" : path);
     } catch (unexpectedError) {
       console.error("Unexpected error during login:", unexpectedError);
       setError("Something went wrong. Please try again.");
@@ -107,6 +83,22 @@ export default function SignIn() {
     <main className="signin-page">
       <section className="signin-shell">
         <section className="signin-left">
+          <Link to="/" className="signin-back-btn">
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <line x1="19" y1="12" x2="5" y2="12"></line>
+              <polyline points="12 19 5 12 12 5"></polyline>
+            </svg>
+            <span>Back to Home</span>
+          </Link>
           <div className="signin-brand">
             <div className="signin-logo-icon">✓</div>
             <div>
@@ -156,18 +148,6 @@ export default function SignIn() {
                 onChange={handleChange}
                 required
               />
-            </label>
-
-            <label>
-              <span>Login as</span>
-              <select
-                name="accountType"
-                value={formData.accountType}
-                onChange={handleChange}
-              >
-                <option value="candidate">Job Seeker</option>
-                <option value="employer">Employer</option>
-              </select>
             </label>
 
             <button

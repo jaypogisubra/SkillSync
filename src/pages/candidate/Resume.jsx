@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import DashboardLayout from "../../components/layout/DashboardLayout";
 import { uploadResume, saveResumeRecord, getResume } from "../../services/api";
+import { syncApplicantSnapshot } from "../../services/applicationService";
 import { supabase } from "../../services/supabase";
 
 export default function Resume() {
@@ -18,8 +19,9 @@ export default function Resume() {
     if (!user) return;
 
     const { data } = await getResume(user.id);
-    // Use the full database row directly so name, size, created_at persist
     if (data) setResumeFile(data);
+
+    syncApplicantSnapshot(user.id).catch(() => {});
   }
 
   function handleAddResume() {
@@ -82,6 +84,8 @@ export default function Resume() {
     const { data: saved } = await getResume(user.id);
     if (saved) setResumeFile(saved);
 
+    syncApplicantSnapshot(user.id).catch(() => {});
+
     setMessage("Resume uploaded successfully.");
     setLoading(false);
   }
@@ -94,6 +98,7 @@ export default function Resume() {
     if (!user) return;
 
     await supabase.from("resumes").delete().eq("applicant_id", user.id);
+    syncApplicantSnapshot(user.id).catch(() => {});
     setResumeFile(null);
     setMessage("Resume deleted successfully.");
     if (fileInputRef.current) fileInputRef.current.value = "";

@@ -1,6 +1,10 @@
 import { ROLES } from "./roles";
 
 export function getDashboardPath(role) {
+  if (role === "job_seeker") {
+    return "/candidate/dashboard";
+  }
+
   switch (role) {
     case ROLES.ADMIN:
       return "/admin/dashboard";
@@ -12,6 +16,6 @@ export function getDashboardPath(role) {
       return "/candidate/dashboard";
 
     default:
-      return "/";
+      return "/candidate/dashboard";
   }
 }

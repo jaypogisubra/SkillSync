@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import DashboardLayout from "../../components/layout/DashboardLayout";
 import { supabase } from "../../services/supabase";
+import { applyForJobWithSnapshot } from "../../services/applicationService";
 
 export default function JobMatches() {
   const [jobs, setJobs] = useState([]);
@@ -45,15 +46,7 @@ export default function JobMatches() {
       return;
     }
 
-    const { data, error } = await supabase
-      .from("applications")
-      .insert([{
-        job_id: job.id,
-        applicant_id: userId,
-        status: "applied",
-      }])
-      .select()
-      .single();
+    const { data, error } = await applyForJobWithSnapshot(job.id, userId);
 
     if (error) {
       setMessage("Failed to apply: " + error.message);
