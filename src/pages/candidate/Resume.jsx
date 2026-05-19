@@ -18,6 +18,7 @@ export default function Resume() {
     if (!user) return;
 
     const { data } = await getResume(user.id);
+    // Use the full database row directly so name, size, created_at persist
     if (data) setResumeFile(data);
   }
 
@@ -58,21 +59,28 @@ export default function Resume() {
       return;
     }
 
-    const { error: dbError } = await saveResumeRecord(user.id, fileUrl, "");
+    // Delete existing resume record before inserting new one
+    await supabase.from("resumes").delete().eq("applicant_id", user.id);
+
+    const { error: dbError } = await supabase
+      .from("resumes")
+      .insert([{
+        applicant_id: user.id,
+        file_url: fileUrl,
+        file_name: file.name,
+        file_size: file.size,
+        extracted_skills: "",
+      }]);
 
     if (dbError) {
-      console.error("Database save failed:", dbError);
-      setMessage(`Resume uploaded to storage, but failed to save to database: ${dbError.message}`);
+      setMessage(`Resume uploaded but failed to save record: ${dbError.message}`);
       setLoading(false);
       return;
     }
 
-    setResumeFile({
-      file_url: fileUrl,
-      name: file.name,
-      size: file.size,
-      uploadedAt: new Date().toISOString(),
-    });
+    // Reload from DB so we get the full persisted row
+    const { data: saved } = await getResume(user.id);
+    if (saved) setResumeFile(saved);
 
     setMessage("Resume uploaded successfully.");
     setLoading(false);
@@ -152,10 +160,10 @@ export default function Resume() {
           <div className="resume-file-card">
             <div className="resume-file-icon">▤</div>
             <div className="resume-file-info">
-              <h3>{resumeFile.name || "Resume"}</h3>
+              <h3>{resumeFile.file_name || resumeFile.name || "Resume"}</h3>
               <p>
-                {formatFileSize(resumeFile.size)} • Uploaded{" "}
-                {formatUploadDate(resumeFile.uploadedAt || resumeFile.created_at)}
+                {formatFileSize(resumeFile.file_size || resumeFile.size)} • Uploaded{" "}
+                {formatUploadDate(resumeFile.created_at || resumeFile.uploadedAt)}
               </p>
             </div>
             <div className="resume-file-actions">
