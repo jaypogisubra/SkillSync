@@ -4,24 +4,33 @@ import { supabase } from "../../services/supabase";
 
 export default function Applicants() {
   const [applicants, setApplicants] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => { loadApplicants(); }, []);
 
   async function loadApplicants() {
+    setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
 
     const { data: jobs } = await supabase
       .from("jobs")
       .select("id, title, employment_type, location")
       .eq("employer_id", user.id);
-    if (!jobs || jobs.length === 0) return;
+    
+    if (!jobs || jobs.length === 0) {
+      setLoading(false);
+      return;
+    }
 
     const jobIds = jobs.map((j) => j.id);
     const jobMap = {};
     jobs.forEach(j => { jobMap[j.id] = j; });
 
-    // Fetch applications without broken FK joins
+    // Fetch applications
     const { data: appsData, error } = await supabase
       .from("applications")
       .select("*")
@@ -30,30 +39,42 @@ export default function Applicants() {
 
     if (error) {
       console.warn("Failed to load applicants:", error.message);
+      setLoading(false);
       return;
     }
 
     const apps = appsData || [];
 
-    // Fetch applicant profiles separately
+    // Fetch applicant profiles and resumes separately
     const applicantIds = [...new Set(apps.map(a => a.applicant_id).filter(Boolean))];
     let profileMap = {};
+    let resumeMap = {};
+
     if (applicantIds.length > 0) {
       const { data: profilesData } = await supabase
         .from("profiles")
         .select("id, full_name, email")
         .in("id", applicantIds);
       (profilesData || []).forEach(p => { profileMap[p.id] = p; });
+
+      // Fetch uploaded resumes
+      const { data: resumesData } = await supabase
+        .from("resumes")
+        .select("applicant_id, file_url, name")
+        .in("applicant_id", applicantIds);
+      (resumesData || []).forEach(r => { resumeMap[r.applicant_id] = r; });
     }
 
-    // Merge job + profile data into each application
+    // Merge job + profile + resume data into each application
     const enriched = apps.map(app => ({
       ...app,
       jobs: jobMap[app.job_id] || null,
       profiles: profileMap[app.applicant_id] || null,
+      resume: resumeMap[app.applicant_id] || null,
     }));
 
     setApplicants(enriched);
+    setLoading(false);
   }
 
   async function updateStatus(appId, newStatus) {
@@ -78,7 +99,12 @@ export default function Applicants() {
         <div className="panel-header applicants-panel-header">
           <div className="panel-header-content"><h2>Applicant List</h2></div>
         </div>
-        {applicants.length === 0 ? (
+
+        {loading ? (
+          <div className="empty-state">
+            <h3>Loading applicants...</h3>
+          </div>
+        ) : applicants.length === 0 ? (
           <div className="empty-state">
             <span>👥</span>
             <h3>No applicants yet</h3>
@@ -103,17 +129,47 @@ export default function Applicants() {
                   <div><span>Location</span><strong>{app.jobs?.location || "No location"}</strong></div>
                   <div><span>Status</span><strong>{app.status || "Applied"}</strong></div>
                 </div>
-                <div className="applicant-actions">
-                  <button type="button" className="job-edit-btn"
-                    onClick={() => handleAccept(app.id)}
-                    disabled={app.status === "hired" || app.status === "rejected"}>
-                    Accept
-                  </button>
-                  <button type="button" className="job-delete-btn"
-                    onClick={() => handleReject(app.id)}
-                    disabled={app.status === "hired" || app.status === "rejected"}>
-                    Reject
-                  </button>
+                <div className="applicant-actions" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px", marginTop: "14px" }}>
+                  <div>
+                    {app.resume?.file_url ? (
+                      <a
+                        href={app.resume.file_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="job-edit-btn"
+                        style={{
+                          textDecoration: "none",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          background: "#faf5ff",
+                          color: "#8b18ff",
+                          border: "1px solid #d9c8f4",
+                          padding: "8px 16px",
+                          borderRadius: "10px",
+                          fontWeight: "800",
+                          fontSize: "13px"
+                        }}
+                      >
+                        📄 View Resume
+                      </a>
+                    ) : (
+                      <span style={{ fontSize: "13px", color: "#98a2b3" }}>No resume uploaded</span>
+                    )}
+                  </div>
+                  
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <button type="button" className="job-edit-btn"
+                      onClick={() => handleAccept(app.id)}
+                      disabled={app.status === "hired" || app.status === "rejected"}>
+                      Accept
+                    </button>
+                    <button type="button" className="job-delete-btn"
+                      onClick={() => handleReject(app.id)}
+                      disabled={app.status === "hired" || app.status === "rejected"}>
+                      Reject
+                    </button>
+                  </div>
                 </div>
               </article>
             ))}

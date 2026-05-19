@@ -1,13 +1,163 @@
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useSearchParams, useNavigate } from "react-router-dom";
+import { supabase } from "../../services/supabase";
 import "./BrowseJobs.css";
 
 export default function BrowseJobs() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+
+  // Inputs mapped to URL params or local state
+  const [keyword, setKeyword] = useState(searchParams.get("keyword") || "");
+  const [location, setLocation] = useState(searchParams.get("location") || "");
+  const [type, setType] = useState(searchParams.get("type") || "");
+
+  // Sidebar interactive filters
+  const [setup, setSetup] = useState("Any");
+  const [skills, setSkills] = useState("");
+
+  // States
+  const [jobs, setJobs] = useState([]);
+  const [filteredJobs, setFilteredJobs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState(null);
+
+  // Sync inputs with URL changes (e.g. from landing page search)
+  useEffect(() => {
+    setKeyword(searchParams.get("keyword") || "");
+    setLocation(searchParams.get("location") || "");
+    setType(searchParams.get("type") || "");
+  }, [searchParams]);
+
+  // Load and verify active user session
+  useEffect(() => {
+    async function checkSession() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        localStorage.removeItem("skillsync_user");
+        localStorage.removeItem("skillsync_candidate_profile");
+        setCurrentUser(null);
+      } else {
+        const userJson = localStorage.getItem("skillsync_user");
+        if (userJson) {
+          try {
+            setCurrentUser(JSON.parse(userJson));
+          } catch (e) {
+            console.error("Failed to parse user session", e);
+          }
+        }
+      }
+    }
+    checkSession();
+  }, []);
+
+  // Fetch open jobs from Supabase
+  useEffect(() => {
+    async function fetchJobs() {
+      setLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from("jobs")
+          .select("*, profiles(full_name, email)")
+          .eq("status", "open")
+          .order("created_at", { ascending: false });
+
+        if (error) throw error;
+        setJobs(data || []);
+      } catch (err) {
+        console.error("Error fetching jobs:", err.message);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchJobs();
+  }, []);
+
+  // Apply search inputs and sidebar filters dynamically
+  useEffect(() => {
+    let result = [...jobs];
+
+    // 1. Keyword search (matches title, description, skills)
+    if (keyword.trim()) {
+      const query = keyword.toLowerCase();
+      result = result.filter(
+        (job) =>
+          job.title?.toLowerCase().includes(query) ||
+          job.description?.toLowerCase().includes(query) ||
+          job.required_skills?.toLowerCase().includes(query)
+      );
+    }
+
+    // 2. Location search
+    if (location.trim()) {
+      const query = location.toLowerCase();
+      result = result.filter((job) =>
+        job.location?.toLowerCase().includes(query)
+      );
+    }
+
+    // 3. Employment Type filter
+    if (type) {
+      result = result.filter(
+        (job) => job.employment_type?.toLowerCase() === type.toLowerCase()
+      );
+    }
+
+    // 4. Setup filter (Remote vs On-site)
+    if (setup !== "Any") {
+      const isRemoteQuery = setup === "Remote";
+      result = result.filter((job) => {
+        const loc = job.location?.toLowerCase() || "";
+        const isRemote = loc.includes("remote") || job.employment_type?.toLowerCase() === "remote";
+        return isRemoteQuery ? isRemote : !isRemote;
+      });
+    }
+
+    // 5. Skill Search filter
+    if (skills.trim()) {
+      const query = skills.toLowerCase();
+      result = result.filter((job) =>
+        job.required_skills?.toLowerCase().includes(query)
+      );
+    }
+
+    setFilteredJobs(result);
+  }, [jobs, keyword, location, type, setup, skills]);
+
+  // Search button handler
+  function handleSearchSubmit() {
+    const params = {};
+    if (keyword) params.keyword = keyword;
+    if (location) params.location = location;
+    if (type) params.type = type;
+    setSearchParams(params);
+  }
+
+  // Clear all filters
+  function handleClearFilters() {
+    setKeyword("");
+    setLocation("");
+    setType("");
+    setSetup("Any");
+    setSkills("");
+    setSearchParams({});
+  }
+
+  // Determine user workspace path based on role
+  function getDashboardPath() {
+    if (!currentUser) return "/sign-in";
+    const role = currentUser.role;
+    if (role === "candidate" || role === "job_seeker") return "/candidate/dashboard";
+    if (role === "employer") return "/employer/dashboard";
+    if (role === "admin") return "/admin/dashboard";
+    return "/candidate/dashboard";
+  }
+
   return (
     <main className="browse-page">
       <header className="browse-navbar">
         <Link to="/" className="browse-brand">
           <span className="browse-brand-icon">✓</span>
-
           <span className="browse-brand-text">
             <strong>SkillSync</strong>
             <small>Find the right match</small>
@@ -24,15 +174,23 @@ export default function BrowseJobs() {
         </nav>
 
         <div className="browse-nav-actions">
-          <Link className="browse-btn browse-btn-light" to="/admin/login">
-            Admin
-          </Link>
-          <Link className="browse-btn browse-btn-outline" to="/sign-in">
-            Sign In
-          </Link>
-          <Link className="browse-btn browse-btn-pink" to="/sign-up">
-            Sign Up
-          </Link>
+          {currentUser ? (
+            <Link className="browse-btn browse-btn-pink" to={getDashboardPath()}>
+              Go to Workspace
+            </Link>
+          ) : (
+            <>
+              <Link className="browse-btn browse-btn-light" to="/admin/login">
+                Admin
+              </Link>
+              <Link className="browse-btn browse-btn-outline" to="/sign-in">
+                Sign In
+              </Link>
+              <Link className="browse-btn browse-btn-pink" to="/sign-up">
+                Sign Up
+              </Link>
+            </>
+          )}
         </div>
       </header>
 
@@ -59,26 +217,39 @@ export default function BrowseJobs() {
           <div className="browse-search-grid">
             <div className="browse-input">
               <span>⌕</span>
-              <input type="text" placeholder="Job title, keyword, or company" />
+              <input
+                type="text"
+                placeholder="Job title, keyword, or company"
+                value={keyword}
+                onChange={(e) => setKeyword(e.target.value)}
+              />
             </div>
 
             <div className="browse-input">
               <span>⌖</span>
-              <input type="text" placeholder="Location" />
+              <input
+                type="text"
+                placeholder="Location"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+              />
             </div>
 
-            <select className="browse-select" defaultValue="">
-              <option value="" disabled>
-                Job Type
-              </option>
-              <option>Full Time</option>
-              <option>Part Time</option>
-              <option>Contract</option>
-              <option>Internship</option>
-              <option>Remote</option>
+            <select
+              className="browse-select"
+              value={type}
+              onChange={(e) => setType(e.target.value)}
+            >
+              <option value="">All Job Types</option>
+              <option value="full-time">Full Time</option>
+              <option value="part-time">Part Time</option>
+              <option value="remote">Remote</option>
+              <option value="internship">Internship</option>
             </select>
 
-            <button className="browse-search-btn">Search Jobs</button>
+            <button className="browse-search-btn" onClick={handleSearchSubmit}>
+              Search Jobs
+            </button>
           </div>
         </div>
       </section>
@@ -90,48 +261,36 @@ export default function BrowseJobs() {
               <h3>Filters</h3>
 
               <div className="browse-filter-group">
-                <label>Experience Level</label>
-                <select>
-                  <option>Any</option>
-                  <option>Entry Level</option>
-                  <option>Mid Level</option>
-                  <option>Senior Level</option>
-                </select>
-              </div>
-
-              <div className="browse-filter-group">
                 <label>Work Setup</label>
-                <select>
-                  <option>Any</option>
-                  <option>On-site</option>
-                  <option>Hybrid</option>
-                  <option>Remote</option>
+                <select value={setup} onChange={(e) => setSetup(e.target.value)}>
+                  <option value="Any">Any Setup</option>
+                  <option value="On-site">On-site</option>
+                  <option value="Remote">Remote</option>
                 </select>
               </div>
 
               <div className="browse-filter-group">
-                <label>Category</label>
-                <select>
-                  <option>Any</option>
-                  <option>Technology</option>
-                  <option>Design</option>
-                  <option>Marketing</option>
-                  <option>Operations</option>
-                </select>
+                <label>Required Skills</label>
+                <input
+                  type="text"
+                  placeholder="e.g. React, Node, CSS"
+                  value={skills}
+                  onChange={(e) => setSkills(e.target.value)}
+                  style={{
+                    height: "44px",
+                    padding: "0 12px",
+                    border: "1px solid #d8dee9",
+                    borderRadius: "14px",
+                    fontSize: "14px",
+                    color: "#344054",
+                    outline: "none",
+                  }}
+                />
               </div>
 
-              <div className="browse-filter-group">
-                <label>Salary Range</label>
-                <select>
-                  <option>Any</option>
-                  <option>Below 20k</option>
-                  <option>20k - 50k</option>
-                  <option>50k - 100k</option>
-                  <option>100k+</option>
-                </select>
-              </div>
-
-              <button className="browse-clear-btn">Clear Filters</button>
+              <button className="browse-clear-btn" onClick={handleClearFilters}>
+                Clear Filters
+              </button>
             </div>
           </aside>
 
@@ -140,38 +299,114 @@ export default function BrowseJobs() {
               <div>
                 <h3>Available Jobs</h3>
                 <p>
-                  Your job listings will appear here once connected to your
-                  backend.
+                  {loading
+                    ? "Loading job opportunities..."
+                    : `Showing ${filteredJobs.length} open position${
+                        filteredJobs.length === 1 ? "" : "s"
+                      } matching your criteria.`}
                 </p>
               </div>
 
               <div className="browse-results-meta">
-                <span className="results-badge">0 Jobs</span>
+                <span className="results-badge">
+                  {loading ? "..." : `${filteredJobs.length} Jobs`}
+                </span>
               </div>
             </div>
 
-            <div className="browse-empty-state">
-              <div className="browse-empty-icon">▣</div>
-              <h4>No job listings yet</h4>
-              <p>
-                Please SignIn/SignUp to continue.
-              </p>
-
-              <div className="browse-empty-actions">
-                <Link to="/sign-in" className="browse-outline-btn">
-                  Sign In
-                </Link>
-                <Link to="/sign-up" className="browse-primary-btn">
-                  Create Account
-                </Link>
+            {loading ? (
+              <div className="browse-placeholder-grid">
+                <div className="browse-placeholder-card"></div>
+                <div className="browse-placeholder-card"></div>
+                <div className="browse-placeholder-card"></div>
               </div>
-            </div>
+            ) : filteredJobs.length === 0 ? (
+              <div className="browse-empty-state">
+                <div className="browse-empty-icon">▣</div>
+                <h4>No job listings found</h4>
+                <p>Try refining your search queries or clearing your filters to see more results.</p>
+                <button
+                  onClick={handleClearFilters}
+                  className="browse-outline-btn"
+                  style={{ marginTop: "16px", cursor: "pointer" }}
+                >
+                  Clear All Filters
+                </button>
+              </div>
+            ) : (
+              <div className="browse-placeholder-grid" style={{ display: "grid", gap: "18px", marginTop: "20px" }}>
+                {filteredJobs.map((job) => (
+                  <article
+                    className="job-match-card"
+                    key={job.id}
+                    style={{
+                      padding: "24px",
+                      border: "1px solid #eadff7",
+                      borderRadius: "22px",
+                      background: "#fbf9ff",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "16px",
+                      boxShadow: "0 10px 24px rgba(16, 24, 40, 0.02)",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "16px" }}>
+                      <div>
+                        <h3 style={{ margin: "0 0 6px", color: "#101828", fontSize: "18px", fontWeight: "900" }}>
+                          {job.title}
+                        </h3>
+                        <p style={{ margin: 0, color: "#667085", fontSize: "14px", lineHeight: "1.6" }}>
+                          {job.description || "No description provided."}
+                        </p>
+                      </div>
+                      <span
+                        className="job-status-badge open"
+                        style={{
+                          padding: "8px 14px",
+                          borderRadius: "999px",
+                          fontSize: "12px",
+                          fontWeight: "900",
+                          background: "#e9fbef",
+                          color: "#15803d",
+                          lineHeight: 1,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {job.status || "open"}
+                      </span>
+                    </div>
 
-            <div className="browse-placeholder-grid">
-              <div className="browse-placeholder-card"></div>
-              <div className="browse-placeholder-card"></div>
-              <div className="browse-placeholder-card"></div>
-            </div>
+                    <div className="job-meta" style={{ display: "flex", gap: "8px", flexWrap: "wrap", margin: 0 }}>
+                      <span style={{ padding: "8px 12px", borderRadius: "999px", background: "#f3ebff", color: "#6f1dce", fontSize: "13px", fontWeight: "900", lineHeight: 1 }}>
+                        {job.employment_type || "Not specified"}
+                      </span>
+                      <span style={{ padding: "8px 12px", borderRadius: "999px", background: "#f3ebff", color: "#6f1dce", fontSize: "13px", fontWeight: "900", lineHeight: 1 }}>
+                        {job.location || "No location"}
+                      </span>
+                      <span style={{ padding: "8px 12px", borderRadius: "999px", background: "#f3ebff", color: "#6f1dce", fontSize: "13px", fontWeight: "900", lineHeight: 1 }}>
+                        Skills: {job.required_skills || "None listed"}
+                      </span>
+                    </div>
+
+                    <div style={{ marginTop: "4px" }}>
+                      <button
+                        onClick={() => navigate(currentUser ? "/candidate/jobs" : "/sign-in")}
+                        className="browse-primary-btn"
+                        style={{
+                          minWidth: "130px",
+                          height: "40px",
+                          fontSize: "13px",
+                          border: "none",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Apply Now
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </section>

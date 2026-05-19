@@ -24,6 +24,8 @@ export const signIn = async (email, password) => {
 // Sign Out
 export const signOut = async () => {
   const { error } = await supabase.auth.signOut()
+  localStorage.removeItem("skillsync_user")
+  localStorage.removeItem("skillsync_candidate_profile")
   return { error }
 }
 

@@ -58,7 +58,14 @@ export default function Resume() {
       return;
     }
 
-    await saveResumeRecord(user.id, fileUrl, "");
+    const { error: dbError } = await saveResumeRecord(user.id, fileUrl, "");
+
+    if (dbError) {
+      console.error("Database save failed:", dbError);
+      setMessage(`Resume uploaded to storage, but failed to save to database: ${dbError.message}`);
+      setLoading(false);
+      return;
+    }
 
     setResumeFile({
       file_url: fileUrl,
