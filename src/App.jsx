@@ -1,0 +1,199 @@
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+
+import Home from "./pages/public/Home/Home";
+import BrowseJobs from "./pages/public/BrowseJobs";
+import HowItWorks from "./pages/public/HowItWorks";
+import ForEmployers from "./pages/public/ForEmployers";
+import AboutUs from "./pages/public/AboutUs";
+
+import SignIn from "./pages/auth/SignIn";
+import SignUp from "./pages/auth/SignUp";
+import AdminLogin from "./pages/auth/AdminLogin";
+
+import CandidateDashboard from "./pages/candidate/CandidateDashboard";
+import Resume from "./pages/candidate/Resume";
+import JobMatches from "./pages/candidate/JobMatches";
+import Applications from "./pages/candidate/Applications";
+import Profile from "./pages/candidate/Profile";
+
+import EmployerDashboard from "./pages/employer/EmployerDashboard";
+import ManageJobs from "./pages/employer/ManageJobs";
+import PostJob from "./pages/employer/PostJob";
+import Applicants from "./pages/employer/Applicants";
+import CompanyProfile from "./pages/employer/CompanyProfile";
+
+import AdminDashboard from "./pages/admin/AdminDashboard";
+import ManageUsers from "./pages/admin/ManageUsers";
+import AdminManageJobs from "./pages/admin/AdminManageJobs";
+import ManageEmployers from "./pages/admin/ManageEmployers";
+import Reports from "./pages/admin/Reports";
+
+import Unauthorized from "./pages/errors/Unauthorized";
+import NotFound from "./pages/errors/NotFound";
+
+import RoleRoute from "./components/guards/RoleRoute";
+import { ROLES } from "./utils/roles";
+
+function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        {/* Public pages */}
+        <Route path="/" element={<Home />} />
+        <Route path="/browse-jobs" element={<BrowseJobs />} />
+        <Route path="/how-it-works" element={<HowItWorks />} />
+        <Route path="/for-employers" element={<ForEmployers />} />
+        <Route path="/about" element={<AboutUs />} />
+
+        {/* Auth pages */}
+        <Route path="/sign-in" element={<SignIn />} />
+        <Route path="/sign-up" element={<SignUp />} />
+        <Route path="/admin/login" element={<AdminLogin />} />
+
+        {/* Candidate pages */}
+        <Route
+          path="/candidate/dashboard"
+          element={
+            <RoleRoute allowedRoles={[ROLES.CANDIDATE]}>
+              <CandidateDashboard />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="/candidate/resume"
+          element={
+            <RoleRoute allowedRoles={[ROLES.CANDIDATE]}>
+              <Resume />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="/candidate/jobs"
+          element={
+            <RoleRoute allowedRoles={[ROLES.CANDIDATE]}>
+              <JobMatches />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="/candidate/applications"
+          element={
+            <RoleRoute allowedRoles={[ROLES.CANDIDATE]}>
+              <Applications />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="/candidate/profile"
+          element={
+            <RoleRoute allowedRoles={[ROLES.CANDIDATE]}>
+              <Profile />
+            </RoleRoute>
+          }
+        />
+
+        {/* Employer pages */}
+        <Route
+          path="/employer/dashboard"
+          element={
+            <RoleRoute allowedRoles={[ROLES.EMPLOYER]}>
+              <EmployerDashboard />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="/employer/jobs"
+          element={
+            <RoleRoute allowedRoles={[ROLES.EMPLOYER]}>
+              <ManageJobs />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="/employer/post-job"
+          element={
+            <RoleRoute allowedRoles={[ROLES.EMPLOYER]}>
+              <PostJob />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="/employer/applicants"
+          element={
+            <RoleRoute allowedRoles={[ROLES.EMPLOYER]}>
+              <Applicants />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="/employer/company"
+          element={
+            <RoleRoute allowedRoles={[ROLES.EMPLOYER]}>
+              <CompanyProfile />
+            </RoleRoute>
+          }
+        />
+
+        {/* Admin pages */}
+        <Route
+          path="/admin/dashboard"
+          element={
+            <RoleRoute allowedRoles={[ROLES.ADMIN]}>
+              <AdminDashboard />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="/admin/users"
+          element={
+            <RoleRoute allowedRoles={[ROLES.ADMIN]}>
+              <ManageUsers />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="/admin/jobs"
+          element={
+            <RoleRoute allowedRoles={[ROLES.ADMIN]}>
+              <AdminManageJobs />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="/admin/employers"
+          element={
+            <RoleRoute allowedRoles={[ROLES.ADMIN]}>
+              <ManageEmployers />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="/admin/reports"
+          element={
+            <RoleRoute allowedRoles={[ROLES.ADMIN]}>
+              <Reports />
+            </RoleRoute>
+          }
+        />
+
+        {/* Error pages */}
+        <Route path="/unauthorized" element={<Unauthorized />} />
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </BrowserRouter>
+  );
+}
+
+export default App;
