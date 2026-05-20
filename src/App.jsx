@@ -9,6 +9,8 @@ import AboutUs from "./pages/public/AboutUs";
 import SignIn from "./pages/auth/SignIn";
 import SignUp from "./pages/auth/SignUp";
 import AdminLogin from "./pages/auth/AdminLogin";
+import ForgotPassword from "./pages/auth/ForgotPassword";
+import ResetPassword from "./pages/auth/ResetPassword";
 
 import CandidateDashboard from "./pages/candidate/CandidateDashboard";
 import Resume from "./pages/candidate/Resume";
@@ -27,6 +29,8 @@ import ManageUsers from "./pages/admin/ManageUsers";
 import AdminManageJobs from "./pages/admin/AdminManageJobs";
 import ManageEmployers from "./pages/admin/ManageEmployers";
 import Reports from "./pages/admin/Reports";
+import ManageResumes from "./pages/admin/ManageResumes";
+import AdminManageApplications from "./pages/admin/AdminManageApplications";
 
 import Unauthorized from "./pages/errors/Unauthorized";
 import NotFound from "./pages/errors/NotFound";
@@ -49,6 +53,8 @@ function App() {
         <Route path="/sign-in" element={<SignIn />} />
         <Route path="/sign-up" element={<SignUp />} />
         <Route path="/admin/login" element={<AdminLogin />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
 
         {/* Candidate pages */}
         <Route
@@ -175,6 +181,24 @@ function App() {
           element={
             <RoleRoute allowedRoles={[ROLES.ADMIN]}>
               <ManageEmployers />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="/admin/resumes"
+          element={
+            <RoleRoute allowedRoles={[ROLES.ADMIN]}>
+              <ManageResumes />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="/admin/applications"
+          element={
+            <RoleRoute allowedRoles={[ROLES.ADMIN]}>
+              <AdminManageApplications />
             </RoleRoute>
           }
         />

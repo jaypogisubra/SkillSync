@@ -98,3 +98,49 @@ export function displayUserName(user) {
   }
   return "Unnamed User";
 }
+
+export async function fetchAdminResumes() {
+  const { data, error } = await supabase.rpc("admin_get_all_resumes");
+  return { data: data || [], error };
+}
+
+export async function fetchAdminApplications() {
+  const { data, error } = await supabase.rpc("admin_get_all_applications");
+  return { data: data || [], error };
+}
+
+export async function toggleUserSuspension(userId, suspendStatus) {
+  const { error } = await supabase.rpc("admin_toggle_user_suspension", {
+    user_id: userId,
+    suspend_status: suspendStatus,
+  });
+  return { error };
+}
+
+export async function deleteUser(userId) {
+  const { error } = await supabase.rpc("admin_delete_user", {
+    user_id: userId,
+  });
+  return { error };
+}
+
+export async function deleteResume(userId) {
+  const { error } = await supabase.rpc("admin_delete_resume", {
+    user_id: userId,
+  });
+  return { error };
+}
+
+export async function updateUserProfile(userId, { fullName, email, contactNumber, address, skills, role }) {
+  const { error } = await supabase.rpc("admin_update_profile", {
+    user_id: userId,
+    new_full_name: fullName || "",
+    new_email: email || "",
+    new_contact_number: contactNumber || "",
+    new_address: address || "",
+    new_skills: Array.isArray(skills) ? skills.join(",") : skills || "",
+    new_role: role || "candidate",
+  });
+  return { error };
+}
+

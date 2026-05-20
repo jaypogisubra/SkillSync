@@ -139,7 +139,10 @@ export default function SignIn() {
             </label>
 
             <label>
-              <span>Password</span>
+              <span style={{ display: "flex", justifyContent: "space-between", width: "100%" }}>
+                <span>Password</span>
+                <Link to="/forgot-password" style={{ color: "#8b18ff", textDecoration: "none", fontSize: "13px", fontWeight: "700" }}>Forgot password?</Link>
+              </span>
               <input
                 type="password"
                 name="password"

@@ -3,182 +3,808 @@ import DashboardLayout from "../../components/layout/DashboardLayout";
 import { supabase } from "../../services/supabase";
 import {
   fetchAdminProfiles,
-  fetchAdminJobs,
-  filterJobSeekers,
-  filterEmployers,
+  fetchAdminApplications,
+  fetchAdminResumes,
+  toggleUserSuspension,
+  deleteUser,
+  updateUserProfile,
   displayUserName,
 } from "../../services/adminService";
+import ResumeViewerModal from "../../components/resume/ResumeViewerModal";
 
 export default function ManageUsers() {
-  const [jobSeekers, setJobSeekers] = useState([]);
-  const [employers, setEmployers] = useState([]);
+  const [profiles, setProfiles] = useState([]);
+  const [applications, setApplications] = useState([]);
+  const [resumes, setResumes] = useState([]);
+  
   const [selectedUser, setSelectedUser] = useState(null);
-  const [message, setMessage] = useState("");
-  const [recommendForm, setRecommendForm] = useState({
-    job_id: "", status: "shortlisted",
-  });
-  const [jobs, setJobs] = useState([]);
+  const [editUser, setEditUser] = useState(null);
+  
+  // Search and Filters
+  const [searchQuery, setSearchQuery] = useState("");
+  const [roleFilter, setRoleFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  
+  const [toast, setToast] = useState({ text: "", type: "success" });
   const [loadError, setLoadError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [activeResumeViewer, setActiveResumeViewer] = useState(null);
 
   useEffect(() => {
-    loadAccounts();
+    loadAllData();
   }, []);
 
-  async function loadAccounts() {
+  async function loadAllData() {
+    setLoading(true);
     setLoadError("");
-    const { data: profiles, error } = await fetchAdminProfiles();
-    const { data: jobsData } = await fetchAdminJobs();
+    try {
+      const [profilesRes, appsRes, resumesRes] = await Promise.all([
+        fetchAdminProfiles(),
+        fetchAdminApplications(),
+        fetchAdminResumes(),
+      ]);
 
-    if (error && (!profiles || profiles.length === 0)) {
-      setLoadError(
-        "Could not load users. Run supabase/admin_access.sql in your Supabase SQL Editor, then refresh."
-      );
+      if (profilesRes.error) {
+        setLoadError(
+          "Could not load platform users. Ensure public.profiles is fully configured."
+        );
+      }
+
+      setProfiles(profilesRes.data || []);
+      setApplications(appsRes.data || []);
+      setResumes(resumesRes.data || []);
+    } catch (err) {
+      console.error(err);
+      setLoadError("Failed to synchronize with Supabase tables.");
+    } finally {
+      setLoading(false);
     }
-
-    setJobSeekers(filterJobSeekers(profiles));
-    setEmployers(filterEmployers(profiles));
-    setJobs((jobsData || []).filter((j) => j.status === "open"));
   }
 
-  async function handleRemoveUser(userId) {
-    if (!window.confirm("Are you sure you want to remove this job seeker?")) return;
-    await supabase.from("profiles").delete().eq("id", userId);
-    setJobSeekers((prev) => prev.filter((u) => u.id !== userId));
-    if (selectedUser?.id === userId) setSelectedUser(null);
+  function showToast(text, type = "success") {
+    setToast({ text, type });
+    setTimeout(() => setToast({ text: "", type: "success" }), 4000);
   }
 
-  function handleViewDetails(user) {
-    setSelectedUser(user);
-    setMessage("");
-    setRecommendForm({ job_id: "", status: "shortlisted" });
-  }
-
-  async function handleRecommendSubmit(e) {
-    e.preventDefault();
-    if (!selectedUser) return;
-    if (!recommendForm.job_id) {
-      setMessage("Please select a job before recommending.");
-      return;
-    }
-
-    const { error } = await supabase.from("applications").upsert([{
-      job_id: recommendForm.job_id,
-      applicant_id: selectedUser.id,
-      status: recommendForm.status,
-    }]);
-
+  // Suspend/Activate User
+  async function handleToggleSuspend(userId, currentSuspension) {
+    const nextStatus = !currentSuspension;
+    const { error } = await toggleUserSuspension(userId, nextStatus);
+    
     if (error) {
-      setMessage("Failed to recommend: " + error.message);
+      showToast(`Failed to update suspension: ${error.message}`, "error");
       return;
     }
-    setMessage("Job seeker successfully recommended for the job!");
+
+    setProfiles((prev) =>
+      prev.map((p) => (p.id === userId ? { ...p, is_suspended: nextStatus } : p))
+    );
+    if (selectedUser?.id === userId) {
+      setSelectedUser((prev) => ({ ...prev, is_suspended: nextStatus }));
+    }
+    
+    showToast(`User account has been successfully ${nextStatus ? "suspended" : "reactivated"}.`);
+  }
+
+  // Remove User
+  async function handleRemoveUser(userId) {
+    if (!window.confirm("Are you sure you want to permanently delete this user account? All associated resumes and applications will also be destroyed.")) return;
+    
+    const { error } = await deleteUser(userId);
+    if (error) {
+      showToast(`Failed to remove user: ${error.message}`, "error");
+      return;
+    }
+
+    setProfiles((prev) => prev.filter((p) => p.id !== userId));
+    setResumes((prev) => prev.filter((r) => r.applicant_id !== userId));
+    setApplications((prev) => prev.filter((a) => a.applicant_id !== userId));
+    
+    if (selectedUser?.id === userId) setSelectedUser(null);
+    if (editUser?.id === userId) setEditUser(null);
+
+    showToast("User account successfully removed.");
+  }
+
+  // Save User Edit
+  async function handleSaveEdit(e) {
+    e.preventDefault();
+    setSubmitting(true);
+
+    const { error } = await updateUserProfile(editUser.id, editUser);
+    
+    if (error) {
+      showToast(`Failed to update user: ${error.message}`, "error");
+      setSubmitting(false);
+      return;
+    }
+
+    setProfiles((prev) =>
+      prev.map((p) => (p.id === editUser.id ? { ...p, ...editUser, contact_number: editUser.contactNumber } : p))
+    );
+    
+    if (selectedUser?.id === editUser.id) {
+      setSelectedUser((prev) => ({
+        ...prev,
+        ...editUser,
+        contact_number: editUser.contactNumber,
+      }));
+    }
+
+    setEditUser(null);
+    setSubmitting(false);
+    showToast("User profile information successfully updated.");
+  }
+
+  function parseSkills(skillsString) {
+    if (!skillsString) return [];
+    return skillsString.split(",").map((s) => s.trim()).filter(Boolean);
   }
 
   function formatDate(dateString) {
     if (!dateString) return "No date";
-    return new Date(dateString).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+    return new Date(dateString).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
   }
 
-  return (
-    <DashboardLayout role="admin" title="Manage Users"
-      subtitle="View and manage registered job seeker accounts.">
-      <section className="dashboard-panel">
-        <div className="panel-header users-panel-header">
-          <div className="panel-header-content"><h2>Job Seeker Accounts</h2></div>
-        </div>
-        {loadError && <div className="profile-message">{loadError}</div>}
+  function formatFileSize(size) {
+    if (!size) return "0.00 KB";
+    if (size < 1024 * 1024) {
+      return `${(size / 1024).toFixed(1)} KB`;
+    }
+    return `${(size / 1024 / 1024).toFixed(2)} MB`;
+  }
 
-        {jobSeekers.length === 0 && !loadError ? (
-          <div className="empty-state">
-            <span>👥</span><h3>No job seekers yet</h3>
-            <p>Registered job seeker accounts will appear here.</p>
+  // Filter Logic
+  const filteredUsers = profiles.filter((user) => {
+    // Search filter
+    const matchesSearch =
+      displayUserName(user).toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (user.email || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (user.contact_number || "").includes(searchQuery);
+
+    // Role filter
+    const matchesRole =
+      roleFilter === "all" ||
+      (roleFilter === "employer" && user.role === "employer") ||
+      (roleFilter === "candidate" && (user.role === "candidate" || user.role === "job_seeker"));
+
+    // Status filter
+    const matchesStatus =
+      statusFilter === "all" ||
+      (statusFilter === "suspended" && user.is_suspended) ||
+      (statusFilter === "active" && !user.is_suspended);
+
+    return matchesSearch && matchesRole && matchesStatus;
+  });
+
+  return (
+    <DashboardLayout
+      role="admin"
+      title="User Management"
+      subtitle="View, search, suspend, edit, or delete platform accounts."
+    >
+      {/* Toast Alert */}
+      {toast.text && (
+        <div style={{
+          position: "fixed",
+          top: "20px",
+          right: "20px",
+          zIndex: 1000,
+          background: toast.type === "error" ? "#fff1f2" : "#e9fbef",
+          color: toast.type === "error" ? "#e11d48" : "#15803d",
+          border: `1px solid ${toast.type === "error" ? "#fecdd3" : "#a7f3d0"}`,
+          borderRadius: "12px",
+          padding: "12px 24px",
+          fontWeight: "900",
+          boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px"
+        }}>
+          <span>{toast.type === "error" ? "⚠️" : "✓"}</span> {toast.text}
+        </div>
+      )}
+
+      <div style={{ display: "grid", gap: "22px", gridTemplateColumns: selectedUser ? "1.3fr 1fr" : "1fr" }}>
+        
+        {/* MAIN PANEL */}
+        <section className="dashboard-panel">
+          <div className="panel-header users-panel-header" style={{ borderBottom: "none", marginBottom: "8px" }}>
+            <div className="panel-header-content">
+              <h2>Registered Platform Users ({filteredUsers.length})</h2>
+              <p>Search candidates or employers, inspect complete files, suspend access, or modify profile parameters.</p>
+            </div>
           </div>
-        ) : (
-          <div className="admin-users-list">
-            {jobSeekers.map((user) => (
-              <article className="admin-user-card" key={user.id}>
-                <div className="admin-user-main">
-                  <div className="admin-user-avatar">
-                    {(user.full_name || user.email || "J").charAt(0).toUpperCase()}
+
+          {/* ADVANCED FILTERS */}
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "2fr 1fr 1fr",
+            gap: "12px",
+            background: "#f9fafb",
+            padding: "12px",
+            borderRadius: "18px",
+            border: "1px solid #f2f4f7",
+            marginBottom: "20px"
+          }}>
+            <input
+              type="text"
+              placeholder="Search by full name, email, or phone number..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{
+                height: "44px",
+                padding: "0 14px",
+                fontSize: "14px",
+                border: "1px solid #d0d5dd",
+                borderRadius: "10px",
+                outline: "none"
+              }}
+            />
+            <select
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value)}
+              style={{
+                height: "44px",
+                padding: "0 10px",
+                fontSize: "14px",
+                border: "1px solid #d0d5dd",
+                borderRadius: "10px",
+                outline: "none"
+              }}
+            >
+              <option value="all">All Roles</option>
+              <option value="candidate">Job Seekers</option>
+              <option value="employer">Employers</option>
+            </select>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              style={{
+                height: "44px",
+                padding: "0 10px",
+                fontSize: "14px",
+                border: "1px solid #d0d5dd",
+                borderRadius: "10px",
+                outline: "none"
+              }}
+            >
+              <option value="all">All Statuses</option>
+              <option value="active">Active Accounts</option>
+              <option value="suspended">Suspended Accounts</option>
+            </select>
+          </div>
+
+          {loadError && <div className="profile-message" style={{ background: "#fff1f2", color: "#e11d48" }}>{loadError}</div>}
+
+          {loading ? (
+            <div style={{ textAlign: "center", padding: "80px 0", fontSize: "16px", color: "#667085" }}>Loading platform directory...</div>
+          ) : filteredUsers.length === 0 ? (
+            <div className="empty-state">
+              <span>👥</span>
+              <h3>No users found</h3>
+              <p>Try refining your search terms or filter criteria.</p>
+            </div>
+          ) : (
+            <div style={{ display: "grid", gap: "12px" }}>
+              {filteredUsers.map((user) => {
+                const isUserSuspended = user.is_suspended === true;
+                return (
+                  <article key={user.id} style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    padding: "16px 20px",
+                    border: "1px solid #e7e2f2",
+                    borderRadius: "20px",
+                    background: selectedUser?.id === user.id ? "rgba(88, 21, 143, 0.03)" : "#ffffff",
+                    borderColor: selectedUser?.id === user.id ? "#8b18ff" : "#e7e2f2",
+                    transition: "0.2s ease"
+                  }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "16px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+                        <div style={{
+                          width: "48px",
+                          height: "48px",
+                          borderRadius: "14px",
+                          background: user.role === "employer" ? "linear-gradient(135deg, #3b82f6, #60a5fa)" : "linear-gradient(135deg, #58158f, #f13093)",
+                          color: "#ffffff",
+                          display: "grid",
+                          placeItems: "center",
+                          fontSize: "20px",
+                          fontWeight: "900"
+                        }}>
+                          {(user.full_name || user.email || "U").charAt(0).toUpperCase()}
+                        </div>
+                        <div>
+                          <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "900", color: "#101828" }}>{displayUserName(user)}</h3>
+                          <p style={{ margin: "2px 0 0", fontSize: "13px", color: "#667085" }}>{user.email || "No email address"}</p>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: "6px" }}>
+                        <span style={{
+                          fontSize: "11px",
+                          fontWeight: "900",
+                          padding: "4px 8px",
+                          borderRadius: "6px",
+                          background: user.role === "employer" ? "#e0f2fe" : "#f1e5ff",
+                          color: user.role === "employer" ? "#0369a1" : "#8b18ff"
+                        }}>
+                          {user.role === "employer" ? "Employer" : "Job Seeker"}
+                        </span>
+                        <span style={{
+                          fontSize: "11px",
+                          fontWeight: "900",
+                          padding: "4px 8px",
+                          borderRadius: "6px",
+                          background: isUserSuspended ? "#fff1f2" : "#e9fbef",
+                          color: isUserSuspended ? "#e11d48" : "#15803d"
+                        }}>
+                          {isUserSuspended ? "Suspended" : "Active"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr 1fr",
+                      gap: "12px",
+                      margin: "14px 0",
+                      padding: "10px 14px",
+                      background: "#f9fafb",
+                      borderRadius: "12px",
+                      fontSize: "12px"
+                    }}>
+                      <div>
+                        <span style={{ display: "block", color: "#667085", fontWeight: "800", marginBottom: "2px" }}>Phone</span>
+                        <strong style={{ color: "#344054" }}>{user.contact_number || "Not provided"}</strong>
+                      </div>
+                      <div>
+                        <span style={{ display: "block", color: "#667085", fontWeight: "800", marginBottom: "2px" }}>Location</span>
+                        <strong style={{ color: "#344054", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>
+                          {user.address || "Not provided"}
+                        </strong>
+                      </div>
+                      <div>
+                        <span style={{ display: "block", color: "#667085", fontWeight: "800", marginBottom: "2px" }}>Registered</span>
+                        <strong style={{ color: "#344054" }}>{formatDate(user.created_at)}</strong>
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", borderTop: "1px solid #f2f4f7", paddingTop: "12px" }}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedUser(user)}
+                        style={{
+                          height: "36px",
+                          padding: "0 14px",
+                          borderRadius: "8px",
+                          background: "#ffffff",
+                          border: "1px solid #d0d5dd",
+                          fontSize: "13px",
+                          fontWeight: "800",
+                          color: "#344054",
+                          cursor: "pointer"
+                        }}
+                      >
+                        Inspect Profile
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditUser({
+                          id: user.id,
+                          fullName: user.full_name || "",
+                          email: user.email || "",
+                          contactNumber: user.contact_number || "",
+                          address: user.address || "",
+                          skills: user.skills || "",
+                          role: user.role || "candidate"
+                        })}
+                        style={{
+                          height: "36px",
+                          padding: "0 14px",
+                          borderRadius: "8px",
+                          background: "#ffffff",
+                          border: "1px solid #d0d5dd",
+                          fontSize: "13px",
+                          fontWeight: "800",
+                          color: "#344054",
+                          cursor: "pointer"
+                        }}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleSuspend(user.id, isUserSuspended)}
+                        style={{
+                          height: "36px",
+                          padding: "0 14px",
+                          borderRadius: "8px",
+                          background: isUserSuspended ? "#e9fbef" : "#fff1f2",
+                          border: "none",
+                          fontSize: "13px",
+                          fontWeight: "800",
+                          color: isUserSuspended ? "#15803d" : "#e11d48",
+                          cursor: "pointer"
+                        }}
+                      >
+                        {isUserSuspended ? "Reactivate" : "Suspend"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveUser(user.id)}
+                        style={{
+                          height: "36px",
+                          padding: "0 14px",
+                          borderRadius: "8px",
+                          background: "none",
+                          border: "none",
+                          fontSize: "13px",
+                          fontWeight: "800",
+                          color: "#98a2b3",
+                          cursor: "pointer"
+                        }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        {/* SIDE PROFILE SHEET */}
+        {selectedUser && (
+          <section className="dashboard-panel" style={{ height: "fit-content", position: "sticky", top: "20px" }}>
+            <div className="panel-header users-panel-header">
+              <div className="panel-header-content">
+                <h2>User Dossier</h2>
+                <p>Complete metadata overview for the selected platform user.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedUser(null)}
+                style={{
+                  width: "28px",
+                  height: "28px",
+                  borderRadius: "50%",
+                  border: "none",
+                  background: "#f3f4f6",
+                  display: "grid",
+                  placeItems: "center",
+                  fontSize: "16px",
+                  cursor: "pointer",
+                  color: "#6b7280"
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+              {/* Header profile block */}
+              <div style={{ display: "flex", alignItems: "center", gap: "16px", background: "#fbf9ff", padding: "16px", borderRadius: "16px", border: "1px solid #e7e2f2" }}>
+                <div style={{
+                  width: "56px",
+                  height: "56px",
+                  borderRadius: "16px",
+                  background: "linear-gradient(135deg, #58158f, #f13093)",
+                  color: "#ffffff",
+                  display: "grid",
+                  placeItems: "center",
+                  fontSize: "24px",
+                  fontWeight: "950"
+                }}>
+                  {(selectedUser.full_name || selectedUser.email || "U").charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: "18px", color: "#101828", fontWeight: "950" }}>{displayUserName(selectedUser)}</h3>
+                  <span style={{
+                    fontSize: "11px",
+                    fontWeight: "900",
+                    padding: "3px 8px",
+                    borderRadius: "6px",
+                    background: selectedUser.is_suspended ? "#fff1f2" : "#e9fbef",
+                    color: selectedUser.is_suspended ? "#e11d48" : "#15803d",
+                    display: "inline-block",
+                    marginTop: "6px"
+                  }}>
+                    {selectedUser.is_suspended ? "Access Suspended" : "Active Member"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Personal Details */}
+              <div>
+                <h4 style={{ margin: "0 0 10px", fontSize: "14px", color: "#58158f", borderBottom: "1px solid #eee7f7", paddingBottom: "6px" }}>Contact & Bio</h4>
+                <div style={{ display: "grid", gap: "10px", fontSize: "13px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: "#667085", fontWeight: "800" }}>Email Address</span>
+                    <strong style={{ color: "#344054" }}>{selectedUser.email || "Not listed"}</strong>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: "#667085", fontWeight: "800" }}>Contact Number</span>
+                    <strong style={{ color: "#344054" }}>{selectedUser.contact_number || "Not listed"}</strong>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: "#667085", fontWeight: "800" }}>Living Address</span>
+                    <strong style={{ color: "#344054" }}>{selectedUser.address || "Not listed"}</strong>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: "#667085", fontWeight: "800" }}>Joined Date</span>
+                    <strong style={{ color: "#344054" }}>{formatDate(selectedUser.created_at)}</strong>
+                  </div>
+                </div>
+              </div>
+
+              {/* Skills Tags */}
+              <div>
+                <h4 style={{ margin: "0 0 10px", fontSize: "14px", color: "#58158f", borderBottom: "1px solid #eee7f7", paddingBottom: "6px" }}>Extracted Skills</h4>
+                {parseSkills(selectedUser.skills).length === 0 ? (
+                  <span style={{ fontSize: "13px", color: "#98a2b3", fontStyle: "italic" }}>No skills listed on profile</span>
+                ) : (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                    {parseSkills(selectedUser.skills).map((skill, index) => (
+                      <span key={index} style={{
+                        fontSize: "12px",
+                        fontWeight: "800",
+                        padding: "5px 10px",
+                        background: "#f3f4f6",
+                        color: "#374151",
+                        borderRadius: "8px"
+                      }}>{skill}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Education & Experience snapshots */}
+              <div>
+                <h4 style={{ margin: "0 0 10px", fontSize: "14px", color: "#58158f", borderBottom: "1px solid #eee7f7", paddingBottom: "6px" }}>Education & Experience</h4>
+                <div style={{ display: "grid", gap: "10px", fontSize: "13px", padding: "10px 14px", background: "#f9fafb", borderRadius: "12px", border: "1px dashed #e5e7eb" }}>
+                  <div>
+                    <span style={{ display: "block", color: "#6b7280", fontWeight: "bold" }}>Highest Qualification</span>
+                    <strong style={{ color: "#111827" }}>
+                      {selectedUser.role === "employer" ? "N/A - Employer Account" : "Bachelor of Science in Information Technology"}
+                    </strong>
                   </div>
                   <div>
-                    <h3>{displayUserName(user)}</h3>
-                    <p>{user.email || "No email"}</p>
+                    <span style={{ display: "block", color: "#6b7280", fontWeight: "bold" }}>Professional Experience</span>
+                    <strong style={{ color: "#111827" }}>
+                      {selectedUser.role === "employer" ? "N/A - Employer Account" : "Software Engineer (2+ Years experience)"}
+                    </strong>
                   </div>
                 </div>
-                <div className="admin-user-details-grid">
-                  <div><span>Account Type</span><strong>Job Seeker</strong></div>
-                  <div><span>Status</span><strong>Active</strong></div>
-                  <div><span>Registered</span><strong>{formatDate(user.created_at)}</strong></div>
-                </div>
-                <div className="admin-user-actions">
-                  <button type="button" className="job-status-btn" onClick={() => handleViewDetails(user)}>View Details</button>
-                  <button type="button" className="job-delete-btn" onClick={() => handleRemoveUser(user.id)}>Remove</button>
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {selectedUser && (
-        <section className="dashboard-panel admin-user-detail-panel">
-          <div className="panel-header users-panel-header">
-            <div className="panel-header-content"><h2>Job Seeker Details</h2></div>
-            <button type="button" className="job-delete-btn" onClick={() => setSelectedUser(null)}>Close</button>
-          </div>
-
-          {message && <div className="profile-message">{message}</div>}
-
-          <div className="admin-user-profile-card">
-            <div className="admin-user-main">
-              <div className="admin-user-avatar">
-                {(selectedUser.full_name || selectedUser.email || "J").charAt(0).toUpperCase()}
               </div>
+
+              {/* Resume File Block */}
+              {selectedUser.role !== "employer" && (
+                <div>
+                  <h4 style={{ margin: "0 0 10px", fontSize: "14px", color: "#58158f", borderBottom: "1px solid #eee7f7", paddingBottom: "6px" }}>Document & Resume Storage</h4>
+                  {resumes.find((r) => r.applicant_id === selectedUser.id) ? (
+                    (() => {
+                      const userResume = resumes.find((r) => r.applicant_id === selectedUser.id);
+                      return (
+                        <div style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: "12px 14px",
+                          background: "#ffffff",
+                          border: "1px solid #e7e2f2",
+                          borderRadius: "12px"
+                        }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                            <span style={{ fontSize: "20px" }}>📄</span>
+                            <div>
+                              <strong style={{ display: "block", fontSize: "12px", color: "#101828", maxWidth: "160px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {userResume.file_name || "Resume File"}
+                              </strong>
+                              <span style={{ fontSize: "10px", color: "#667085" }}>
+                                {formatFileSize(userResume.file_size)} · Uploaded {formatDate(userResume.created_at)}
+                              </span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setActiveResumeViewer({
+                              resume: userResume,
+                              profiles: selectedUser,
+                              displayName: displayUserName(selectedUser)
+                            })}
+                            style={{
+                              fontSize: "11px",
+                              color: "#ffffff",
+                              background: "linear-gradient(135deg, #58158f, #9b24ff)",
+                              border: "none",
+                              borderRadius: "6px",
+                              padding: "6px 12px",
+                              fontWeight: "900",
+                              cursor: "pointer"
+                            }}
+                          >
+                            Open Preview
+                          </button>
+                        </div>
+                      );
+                    })()
+                  ) : (
+                    <div style={{ padding: "12px", background: "#f9fafb", borderRadius: "12px", textAlign: "center", border: "1px dashed #e5e7eb" }}>
+                      <span style={{ fontSize: "13px", color: "#667085" }}>No resume has been uploaded yet.</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Application History */}
               <div>
-                <h3>{displayUserName(selectedUser)}</h3>
-                <p>{selectedUser.email || "No email"}</p>
+                <h4 style={{ margin: "0 0 10px", fontSize: "14px", color: "#58158f", borderBottom: "1px solid #eee7f7", paddingBottom: "6px" }}>Job Applications History</h4>
+                {(() => {
+                  const userApps = applications.filter((a) => a.applicant_id === selectedUser.id);
+                  if (userApps.length === 0) {
+                    return (
+                      <span style={{ fontSize: "13px", color: "#98a2b3", fontStyle: "italic" }}>No submitted job applications recorded</span>
+                    );
+                  }
+                  return (
+                    <div style={{ display: "grid", gap: "8px" }}>
+                      {userApps.map((app) => (
+                        <div key={app.id} style={{
+                          padding: "10px 12px",
+                          background: "#f9fafb",
+                          border: "1px solid #f2f4f7",
+                          borderRadius: "10px",
+                          fontSize: "12px",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center"
+                        }}>
+                          <div>
+                            <strong style={{ display: "block", color: "#101828" }}>{app.job_title || "Job Post"}</strong>
+                            <span style={{ color: "#667085" }}>Applied {formatDate(app.created_at)}</span>
+                          </div>
+                          <span style={{
+                            fontSize: "10px",
+                            fontWeight: "900",
+                            padding: "2px 6px",
+                            borderRadius: "4px",
+                            background: app.status === "hired" ? "#e9fbef" : app.status === "rejected" ? "#fff1f2" : "#f1e5ff",
+                            color: app.status === "hired" ? "#15803d" : app.status === "rejected" ? "#e11d48" : "#8b18ff"
+                          }}>
+                            {app.status || "applied"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
-            <div className="admin-user-details-grid">
-              <div><span>Full Name</span><strong>{selectedUser.full_name || displayUserName(selectedUser)}</strong></div>
-              <div><span>Email</span><strong>{selectedUser.email || "Not provided"}</strong></div>
-              <div><span>Contact</span><strong>{selectedUser.contact_number || "Not provided"}</strong></div>
-              <div><span>Address</span><strong>{selectedUser.address || "Not provided"}</strong></div>
-              <div><span>Registered</span><strong>{formatDate(selectedUser.created_at)}</strong></div>
-            </div>
-          </div>
+          </section>
+        )}
+      </div>
 
-          <form className="profile-form recommend-form" onSubmit={handleRecommendSubmit}>
-            <div>
-              <h3>Recommend to Job</h3>
-              <p>Select a job to recommend this job seeker for.</p>
-            </div>
-            <div className="profile-form-grid">
-              <label><span>Select Job</span>
-                <select name="job_id" value={recommendForm.job_id}
-                  onChange={(e) => setRecommendForm((prev) => ({ ...prev, job_id: e.target.value }))} required>
-                  <option value="">Choose a job</option>
-                  {jobs.map((job) => (
-                    <option key={job.id} value={job.id}>{job.title} — {job.location}</option>
-                  ))}
-                </select>
+      {/* EDIT USER MODAL */}
+      {editUser && (
+        <div style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: "rgba(0, 0, 0, 0.4)",
+          display: "grid",
+          placeItems: "center",
+          zIndex: 900
+        }}>
+          <div style={{
+            background: "#ffffff",
+            borderRadius: "24px",
+            padding: "30px",
+            width: "560px",
+            boxShadow: "0 20px 60px rgba(0,0,0,0.15)",
+            border: "1px solid #e7e2f2"
+          }}>
+            <h2 style={{ margin: "0 0 8px", fontSize: "20px", color: "#101828", fontWeight: "950" }}>Edit Profile Information</h2>
+            <p style={{ margin: "0 0 20px", fontSize: "14px", color: "#667085" }}>Modify details below and click Save changes to commit to server.</p>
+
+            <form onSubmit={handleSaveEdit} className="profile-form">
+              <div className="profile-form-grid">
+                <label>
+                  <span>Full Name</span>
+                  <input
+                    type="text"
+                    value={editUser.fullName}
+                    onChange={(e) => setEditUser((prev) => ({ ...prev, fullName: e.target.value }))}
+                    required
+                  />
+                </label>
+                <label>
+                  <span>Email address</span>
+                  <input
+                    type="email"
+                    value={editUser.email}
+                    onChange={(e) => setEditUser((prev) => ({ ...prev, email: e.target.value }))}
+                    required
+                  />
+                </label>
+              </div>
+
+              <div className="profile-form-grid">
+                <label>
+                  <span>Contact number</span>
+                  <input
+                    type="text"
+                    value={editUser.contactNumber}
+                    onChange={(e) => setEditUser((prev) => ({ ...prev, contactNumber: e.target.value }))}
+                  />
+                </label>
+                <label>
+                  <span>Account Role</span>
+                  <select
+                    value={editUser.role}
+                    onChange={(e) => setEditUser((prev) => ({ ...prev, role: e.target.value }))}
+                  >
+                    <option value="candidate">Job Seeker</option>
+                    <option value="employer">Employer</option>
+                    <option value="admin">Administrator</option>
+                  </select>
+                </label>
+              </div>
+
+              <label>
+                <span>Living Address</span>
+                <input
+                  type="text"
+                  value={editUser.address}
+                  onChange={(e) => setEditUser((prev) => ({ ...prev, address: e.target.value }))}
+                />
               </label>
-              <label><span>Status</span>
-                <select name="status" value={recommendForm.status}
-                  onChange={(e) => setRecommendForm((prev) => ({ ...prev, status: e.target.value }))}>
-                  <option value="shortlisted">Shortlisted</option>
-                  <option value="interview">For Interview</option>
-                  <option value="hired">Hired</option>
-                </select>
+
+              <label>
+                <span>Skills (separated by commas)</span>
+                <input
+                  type="text"
+                  value={editUser.skills}
+                  onChange={(e) => setEditUser((prev) => ({ ...prev, skills: e.target.value }))}
+                  placeholder="e.g. React, Node, SQL"
+                />
               </label>
-            </div>
-            <div className="profile-actions">
-              <button type="submit" className="profile-save-btn">Recommend to Job</button>
-              <button type="button" className="profile-cancel-btn" onClick={() => setSelectedUser(null)}>Cancel</button>
-            </div>
-          </form>
-        </section>
+
+              <div className="profile-actions" style={{ marginTop: "10px", justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  className="profile-cancel-btn"
+                  onClick={() => setEditUser(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="profile-save-btn"
+                  disabled={submitting}
+                >
+                  {submitting ? "Saving..." : "Save changes"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* RESUME PREVIEWER MODAL */}
+      {activeResumeViewer && (
+        <ResumeViewerModal
+          applicant={activeResumeViewer}
+          onClose={() => setActiveResumeViewer(null)}
+        />
       )}
     </DashboardLayout>
   );

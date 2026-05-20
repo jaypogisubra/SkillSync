@@ -21,10 +21,6 @@ export default function HowItWorks() {
         </div>
 
         <div className="how-nav-actions">
-          <Link to="/admin/login" className="how-btn how-btn-light">
-            Admin
-          </Link>
-
           <Link to="/sign-in" className="how-btn how-btn-outline">
             Sign In
           </Link>

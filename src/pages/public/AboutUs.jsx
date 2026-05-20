@@ -24,9 +24,6 @@ export default function AboutUs() {
         </nav>
 
         <div className="about-nav-actions">
-          <Link className="about-btn about-btn-light" to="/admin/login">
-            Admin
-          </Link>
           <Link className="about-btn about-btn-outline" to="/sign-in">
             Sign In
           </Link>

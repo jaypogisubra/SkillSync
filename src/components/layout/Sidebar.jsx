@@ -7,7 +7,9 @@ const sidebarLinks = {
     { label: "Manage Users", icon: "👥", path: "/admin/users" },
     { label: "Manage Jobs", icon: "▣", path: "/admin/jobs" },
     { label: "Employers", icon: "▤", path: "/admin/employers" },
-    { label: "Reports", icon: "↗", path: "/admin/reports" },
+    { label: "Resume Vault", icon: "📁", path: "/admin/resumes" },
+    { label: "Applications", icon: "↗", path: "/admin/applications" },
+    { label: "Reports", icon: "⚙", path: "/admin/reports" },
   ],
 
   candidate: [

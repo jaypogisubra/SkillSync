@@ -27,9 +27,6 @@ export default function Home() {
         </nav>
 
         <div className="nav-actions">
-          <Link className="btn btn-light" to="/admin/login">
-            Admin
-          </Link>
           <Link className="btn btn-outline" to="/sign-in">
             Sign In
           </Link>

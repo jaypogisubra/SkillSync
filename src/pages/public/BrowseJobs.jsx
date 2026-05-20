@@ -180,9 +180,6 @@ export default function BrowseJobs() {
             </Link>
           ) : (
             <>
-              <Link className="browse-btn browse-btn-light" to="/admin/login">
-                Admin
-              </Link>
               <Link className="browse-btn browse-btn-outline" to="/sign-in">
                 Sign In
               </Link>
