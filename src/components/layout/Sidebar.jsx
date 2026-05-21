@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
+import ConfirmDialog from "../ui/ConfirmDialog";
 import { signOut } from "../../services/authService";
 
 const sidebarLinks = {
@@ -31,6 +33,8 @@ const sidebarLinks = {
 
 export default function Sidebar({ role }) {
   const navigate = useNavigate();
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   const links = sidebarLinks[role] || sidebarLinks.candidate;
 
@@ -45,12 +49,22 @@ export default function Sidebar({ role }) {
       : "Career Workspace";
 
   async function handleLogout() {
+    setLoggingOut(true);
     try {
       await signOut();
-    } finally {
       navigate("/sign-in", { replace: true });
+    } finally {
+      setLoggingOut(false);
+      setShowLogoutConfirm(false);
     }
   }
+
+  const workspaceLabel =
+    role === "admin"
+      ? "admin panel"
+      : role === "employer"
+      ? "employer workspace"
+      : "career workspace";
 
   return (
     <aside className="dashboard-sidebar">
@@ -82,9 +96,25 @@ export default function Sidebar({ role }) {
         ))}
       </nav>
 
-      <button type="button" className="sidebar-logout" onClick={handleLogout}>
+      <button
+        type="button"
+        className="sidebar-logout"
+        onClick={() => setShowLogoutConfirm(true)}
+      >
         Logout
       </button>
+
+      <ConfirmDialog
+        open={showLogoutConfirm}
+        title="Log out?"
+        message={`You will leave your ${workspaceLabel} and need to sign in again to continue.`}
+        confirmLabel="Log out"
+        cancelLabel="Stay signed in"
+        variant="danger"
+        loading={loggingOut}
+        onCancel={() => !loggingOut && setShowLogoutConfirm(false)}
+        onConfirm={handleLogout}
+      />
     </aside>
   );
 }

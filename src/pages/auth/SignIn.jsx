@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { signIn } from "../../services/authService";
 import { supabase } from "../../services/supabase";
 import { setCurrentUser } from "../../services/localStorageService";
@@ -12,8 +12,15 @@ function resolveRole(profileRole, metadataRole) {
   return role;
 }
 
+function safeRedirectPath(value) {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return null;
+  return value;
+}
+
 export default function SignIn() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const redirectTo = safeRedirectPath(searchParams.get("redirect"));
 
   const [formData, setFormData] = useState({
     email: "",
@@ -68,6 +75,11 @@ export default function SignIn() {
         role,
         full_name: profile?.full_name || data.user?.user_metadata?.full_name || "",
       });
+
+      if (redirectTo) {
+        navigate(redirectTo);
+        return;
+      }
 
       const path = getDashboardPath(role);
       navigate(path === "/" ? "/candidate/dashboard" : path);
